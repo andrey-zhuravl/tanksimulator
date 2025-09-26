@@ -44,3 +44,27 @@ class Projectile:
         direction = pygame.math.Vector2(math.cos(angle_rad), math.sin(angle_rad))
         velocity = direction * config.PROJECTILE_SPEED
         return cls(position=origin.copy(), velocity=velocity)
+
+    def to_state(self) -> "ProjectileState":
+        return ProjectileState(x=float(self.position.x), y=float(self.position.y))
+
+
+@dataclass
+class ProjectileState:
+    x: float
+    y: float
+
+    def to_dict(self) -> dict:
+        return {"x": self.x, "y": self.y}
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "ProjectileState":
+        return cls(x=float(payload["x"]), y=float(payload["y"]))
+
+    def draw(self, surface: pygame.Surface) -> None:
+        pygame.draw.circle(
+            surface,
+            config.PROJECTILE_COLOR,
+            (int(self.x), int(self.y)),
+            5,
+        )
