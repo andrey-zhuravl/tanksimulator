@@ -27,11 +27,13 @@ POINT_COLORS = [
     (255, 224, 130),
 ]
 POINT_RADIUS = 10
-GRAVITATIONAL_CONSTANT = 5000.0
+GRAVITATIONAL_CONSTANT = 60000.0
 MAX_SPEED = 220.0
 TIME_STEP = 1.0 / 60.0
 BOUNDARY_PADDING = 4
 BOUNCE_DAMPING = 0.9
+SOFTENING_DISTANCE = 12.0
+MAX_FORCE = 4000.0
 
 
 @dataclass
@@ -74,10 +76,11 @@ class GravitySimulation:
                 distance_sq = offset.length_squared()
                 if distance_sq < 1e-4:
                     continue
-                clamped_distance_sq = max(distance_sq, 25.0)
+                softened_distance_sq = distance_sq + SOFTENING_DISTANCE * SOFTENING_DISTANCE
                 force_magnitude = (
-                    GRAVITATIONAL_CONSTANT * pi.mass * pj.mass / clamped_distance_sq
+                    GRAVITATIONAL_CONSTANT * pi.mass * pj.mass / softened_distance_sq
                 )
+                force_magnitude = min(force_magnitude, MAX_FORCE)
                 force_direction = offset.normalize()
                 force = force_direction * force_magnitude
                 forces[i] += force
