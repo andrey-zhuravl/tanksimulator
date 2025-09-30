@@ -10,8 +10,8 @@ from typing import Callable, Iterable, List
 import pygame
 
 
-SCREEN_WIDTH = 960
-SCREEN_HEIGHT = 640
+SCREEN_WIDTH = 2200
+SCREEN_HEIGHT = 1240
 CONTROL_PANEL_WIDTH = 260
 SIMULATION_WIDTH = SCREEN_WIDTH - CONTROL_PANEL_WIDTH
 BACKGROUND_COLOR = (15, 15, 30)
@@ -19,16 +19,16 @@ PANEL_COLOR = (28, 28, 48)
 TEXT_COLOR = (220, 220, 230)
 SLIDER_TRACK_COLOR = (80, 80, 110)
 SLIDER_HANDLE_COLOR = (210, 210, 230)
-TRAIL_MAX_LENGTH = 800
+TRAIL_MAX_LENGTH = 1
 
 
 @dataclass
 class SimulationSettings:
     """Parameters that can be tuned during the simulation."""
 
-    num_points: int = 5
+    num_points: int = 150
     point_radius: float = 2.0
-    gravitational_constant: float = 60000.0
+    gravitational_constant: float = 600000.0
     max_speed: float = 1720.0
     time_step: float = 1.0 / 120.0
     boundary_padding: float = 4.0
@@ -280,8 +280,8 @@ def _build_sliders(settings: SimulationSettings) -> List[Slider]:
         (
             "Gravity",
             "gravitational_constant",
-            1000.0,
-            120000.0,
+            100.0,
+            1200000.0,
             lambda v: v,
             lambda v: f"{v:,.0f}",
         ),
@@ -289,7 +289,7 @@ def _build_sliders(settings: SimulationSettings) -> List[Slider]:
             "Max speed",
             "max_speed",
             100.0,
-            4000.0,
+            15000.0,
             lambda v: v,
             lambda v: f"{v:,.0f}",
         ),
@@ -329,7 +329,7 @@ def _build_sliders(settings: SimulationSettings) -> List[Slider]:
             "Max force",
             "max_force",
             1000.0,
-            40000.0,
+            80000.0,
             lambda v: v,
             lambda v: f"{v:,.0f}",
         ),
