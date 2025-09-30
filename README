@@ -19,6 +19,14 @@ python src/main.py client --host 127.0.0.1 --port 5005 --team player
 python src/main.py ai --host 127.0.0.1 --port 5005 --team enemy
 ```
 
+## Симуляция гравитационных точек
+
+Запустить отдельный модуль с пятью гравитационными точками можно так:
+
+```bash
+python -m tanks.gravity_sim
+```
+
 ## Управление в клиенте с клавиатурой
 
 - `W` / `S` — движение вперёд и назад
