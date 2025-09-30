@@ -30,7 +30,8 @@ def create_default_points(settings: SimulationSettings, rng: random.Random) -> l
 def create_random_point(
     settings: SimulationSettings, rng: random.Random, group_index: int
 ) -> GravityPoint:
-    position = pygame.Vector2(
+    half_depth = max(0.0, settings.volume_depth / 2 - settings.boundary_padding - 10)
+    position = pygame.Vector3(
         rng.uniform(
             settings.point_radius + settings.boundary_padding + 10,
             SIMULATION_WIDTH - settings.point_radius - settings.boundary_padding - 10,
@@ -39,10 +40,15 @@ def create_random_point(
             settings.point_radius + settings.boundary_padding + 10,
             SCREEN_HEIGHT - settings.point_radius - settings.boundary_padding - 10,
         ),
+        rng.uniform(
+            -half_depth,
+            half_depth,
+        ),
     )
     max_initial_speed = settings.get_group_max_speed(group_index)
     spread = min(120.0, max_initial_speed * 0.25)
-    velocity = pygame.Vector2(
+    velocity = pygame.Vector3(
+        rng.uniform(-spread, spread),
         rng.uniform(-spread, spread),
         rng.uniform(-spread, spread),
     )

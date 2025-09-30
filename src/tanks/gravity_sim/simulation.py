@@ -7,7 +7,7 @@ from typing import Iterable, List
 
 import pygame
 
-from .constants import SCREEN_HEIGHT, SIMULATION_WIDTH
+from .constants import SCREEN_HEIGHT, SIMULATION_WIDTH, TRAIL_MAX_LENGTH
 from .point import GravityPoint
 from .settings import SimulationSettings
 
@@ -19,20 +19,27 @@ class GravitySimulation:
         self.settings = settings
         self.points: List[GravityPoint] = list(points)
         self.last_average_acceleration: float = 0.0
-        self.last_average_acceleration_vector: pygame.Vector2 = pygame.Vector2()
+        self.last_average_acceleration_vector: pygame.Vector3 = pygame.Vector3()
         self.last_average_mass: float = 0.0
-        self.last_center_of_mass: pygame.Vector2 = pygame.Vector2(
-            SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2
+        self.last_center_of_mass: pygame.Vector3 = pygame.Vector3(
+            SIMULATION_WIDTH / 2,
+            SCREEN_HEIGHT / 2,
+            0.0,
         )
         self.last_density_metric: float = 0.0
-        self._max_density_radius = math.hypot(SIMULATION_WIDTH, SCREEN_HEIGHT) / 2.0
+        diagonal_sq = (
+            SIMULATION_WIDTH * SIMULATION_WIDTH
+            + SCREEN_HEIGHT * SCREEN_HEIGHT
+            + self.settings.volume_depth * self.settings.volume_depth
+        )
+        self._max_density_radius = math.sqrt(diagonal_sq) / 2.0
         self._update_density_stats()
 
     def step(self, dt: float) -> None:
         for point in self.points:
             point.mass = self.settings.get_group_mass(point.group_index)
 
-        forces = [pygame.Vector2() for _ in self.points]
+        forces = [pygame.Vector3() for _ in self.points]
         softening_sq = self.settings.softening_distance * self.settings.softening_distance
 
         for i in range(len(self.points)):
@@ -54,7 +61,7 @@ class GravitySimulation:
                 forces[i] += force
                 forces[j] -= force
 
-        total_acceleration = pygame.Vector2()
+        total_acceleration = pygame.Vector3()
         total_magnitude = 0.0
 
         for point, force in zip(self.points, forces):
@@ -70,13 +77,17 @@ class GravitySimulation:
             point.position += point.velocity * dt
             self._keep_inside(point)
             point.limit_speed(group_speed_limit)
+            if TRAIL_MAX_LENGTH > 0:
+                point.trail.append(point.position.copy())
+                if len(point.trail) > TRAIL_MAX_LENGTH:
+                    del point.trail[: len(point.trail) - TRAIL_MAX_LENGTH]
 
         count = len(self.points)
         if count > 0:
             self.last_average_acceleration_vector = total_acceleration / count
             self.last_average_acceleration = total_magnitude / count
         else:
-            self.last_average_acceleration_vector = pygame.Vector2()
+            self.last_average_acceleration_vector = pygame.Vector3()
             self.last_average_acceleration = 0.0
 
         self._update_density_stats()
@@ -87,8 +98,11 @@ class GravitySimulation:
 
         limit_x = SIMULATION_WIDTH - radius - padding
         limit_y = SCREEN_HEIGHT - radius - padding
+        half_depth = max(0.0, self.settings.volume_depth / 2 - radius - padding)
         min_x = radius + padding
         min_y = radius + padding
+        max_z = half_depth
+        min_z = -half_depth
 
         if point.position.x < min_x:
             point.position.x = min_x
@@ -108,12 +122,23 @@ class GravitySimulation:
             if point.velocity.y > 0:
                 point.velocity.y *= -self.settings.bounce_damping
 
+        if point.position.z < min_z:
+            point.position.z = min_z
+            if point.velocity.z < 0:
+                point.velocity.z *= -self.settings.bounce_damping
+        elif point.position.z > max_z:
+            point.position.z = max_z
+            if point.velocity.z > 0:
+                point.velocity.z *= -self.settings.bounce_damping
+
     def _update_density_stats(self) -> None:
         if not self.points:
             self.last_density_metric = 0.0
             self.last_average_mass = 0.0
-            self.last_center_of_mass = pygame.Vector2(
-                SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2
+            self.last_center_of_mass = pygame.Vector3(
+                SIMULATION_WIDTH / 2,
+                SCREEN_HEIGHT / 2,
+                0.0,
             )
             return
 
@@ -121,12 +146,14 @@ class GravitySimulation:
         if total_mass <= 0:
             self.last_density_metric = 0.0
             self.last_average_mass = 0.0
-            self.last_center_of_mass = pygame.Vector2(
-                SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2
+            self.last_center_of_mass = pygame.Vector3(
+                SIMULATION_WIDTH / 2,
+                SCREEN_HEIGHT / 2,
+                0.0,
             )
             return
 
-        weighted_position = pygame.Vector2()
+        weighted_position = pygame.Vector3()
         for point in self.points:
             weighted_position += point.position * point.mass
 

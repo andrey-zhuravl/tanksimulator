@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 
 import pygame
@@ -69,14 +70,41 @@ def run() -> None:
         if trails_enabled:
             for point in simulation.points:
                 if len(point.trail) > 1:
-                    pygame.draw.lines(surface, point.color, False, point.trail, 2)
+                    trail_points: list[tuple[int, int]] = []
+                    for position in point.trail:
+                        projection = _project_point(position, settings)
+                        if projection is None:
+                            continue
+                        (tx, ty), _, _ = projection
+                        if not math.isfinite(tx) or not math.isfinite(ty):
+                            continue
+                        if tx < 0 or tx >= SIMULATION_WIDTH or ty < 0 or ty >= SCREEN_HEIGHT:
+                            continue
+                        trail_points.append((int(tx), int(ty)))
+                    if len(trail_points) > 1:
+                        pygame.draw.lines(surface, point.color, False, trail_points, 2)
 
+        drawable_points: list[tuple[float, float, float, int, tuple[int, int, int]]] = []
         for point in simulation.points:
+            projection = _project_point(point.position, settings)
+            if projection is None:
+                continue
+            (px, py), scale, depth = projection
+            if not math.isfinite(px) or not math.isfinite(py) or scale <= 0:
+                continue
+            if px < 0 or px >= SIMULATION_WIDTH or py < 0 or py >= SCREEN_HEIGHT:
+                continue
+            radius = max(1, min(60, int(round(settings.point_radius * scale))))
+            drawable_points.append((depth, px, py, radius, point.color))
+
+        drawable_points.sort(key=lambda item: item[0], reverse=True)
+
+        for _, px, py, radius, color in drawable_points:
             pygame.draw.circle(
                 surface,
-                point.color,
-                (int(point.position.x), int(point.position.y)),
-                max(1, int(round(settings.point_radius))),
+                color,
+                (int(px), int(py)),
+                radius,
             )
 
         title_surface = info_font.render("Controls", True, TEXT_COLOR)
@@ -189,6 +217,46 @@ def _build_sliders(settings: SimulationSettings) -> list[Slider]:
             lambda v: v,
             lambda v: f"{v:,.0f}",
         ),
+        (
+            "Camera distance",
+            "projection_distance",
+            200.0,
+            4000.0,
+            lambda v: round(max(50.0, v), 1),
+            lambda v: f"{v:.0f}",
+        ),
+        (
+            "Perspective",
+            "perspective_angle",
+            10.0,
+            140.0,
+            lambda v: round(max(5.0, min(175.0, v)), 1),
+            lambda v: f"{v:.1f}°",
+        ),
+        (
+            "Rotate X",
+            "rotation_x",
+            -180.0,
+            180.0,
+            lambda v: round(v, 1),
+            lambda v: f"{v:.1f}°",
+        ),
+        (
+            "Rotate Y",
+            "rotation_y",
+            -180.0,
+            180.0,
+            lambda v: round(v, 1),
+            lambda v: f"{v:.1f}°",
+        ),
+        (
+            "Rotate Z",
+            "rotation_z",
+            -180.0,
+            180.0,
+            lambda v: round(v, 1),
+            lambda v: f"{v:.1f}°",
+        ),
     ]
 
     for index, (label, attr, min_v, max_v, postprocess, formatter) in enumerate(specs):
@@ -249,4 +317,55 @@ def _build_sliders(settings: SimulationSettings) -> list[Slider]:
         )
 
     return sliders
+
+
+def _project_point(
+    position: pygame.Vector3, settings: SimulationSettings
+) -> tuple[tuple[float, float], float, float] | None:
+    center = pygame.Vector3(SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2, 0.0)
+    relative = position - center
+    rotated = _rotate_vector(relative, settings)
+
+    distance = max(10.0, settings.projection_distance)
+    z = rotated.z + distance
+    if z <= 1.0:
+        return None
+
+    angle = max(5.0, min(175.0, settings.perspective_angle))
+    fov_rad = math.radians(angle)
+    tan_half = math.tan(fov_rad / 2.0)
+    if tan_half <= 0.0:
+        return None
+
+    focal_length_x = 0.5 * SIMULATION_WIDTH / tan_half
+    focal_length_y = 0.5 * SCREEN_HEIGHT / tan_half
+    projected_x = (rotated.x * focal_length_x) / z + SIMULATION_WIDTH / 2
+    projected_y = (rotated.y * focal_length_y) / z + SCREEN_HEIGHT / 2
+    scale = focal_length_y / z
+    return (projected_x, projected_y), scale, z
+
+
+def _rotate_vector(vector: pygame.Vector3, settings: SimulationSettings) -> pygame.Vector3:
+    rotated = pygame.Vector3(vector)
+
+    rx = math.radians(settings.rotation_x)
+    ry = math.radians(settings.rotation_y)
+    rz = math.radians(settings.rotation_z)
+
+    cos_x, sin_x = math.cos(rx), math.sin(rx)
+    y = rotated.y * cos_x - rotated.z * sin_x
+    z = rotated.y * sin_x + rotated.z * cos_x
+    rotated.y, rotated.z = y, z
+
+    cos_y, sin_y = math.cos(ry), math.sin(ry)
+    x = rotated.x * cos_y + rotated.z * sin_y
+    z = -rotated.x * sin_y + rotated.z * cos_y
+    rotated.x, rotated.z = x, z
+
+    cos_z, sin_z = math.cos(rz), math.sin(rz)
+    x = rotated.x * cos_z - rotated.y * sin_z
+    y = rotated.x * sin_z + rotated.y * cos_z
+    rotated.x, rotated.y = x, y
+
+    return rotated
 

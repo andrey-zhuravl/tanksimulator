@@ -13,12 +13,12 @@ import pygame
 class GravityPoint:
     """A simple body affected by gravity."""
 
-    position: pygame.Vector2
-    velocity: pygame.Vector2
+    position: pygame.Vector3
+    velocity: pygame.Vector3
     mass: float
     color: tuple[int, int, int]
     group_index: int
-    trail: List[tuple[float, float]] = field(default_factory=list)
+    trail: List[pygame.Vector3] = field(default_factory=list)
 
     def limit_speed(self, max_speed: float) -> None:
         max_speed_sq = max_speed * max_speed
