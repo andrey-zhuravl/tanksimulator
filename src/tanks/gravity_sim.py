@@ -19,13 +19,6 @@ PANEL_COLOR = (28, 28, 48)
 TEXT_COLOR = (220, 220, 230)
 SLIDER_TRACK_COLOR = (80, 80, 110)
 SLIDER_HANDLE_COLOR = (210, 210, 230)
-POINT_COLORS = [
-    (240, 98, 146),
-    (129, 212, 250),
-    (244, 143, 177),
-    (165, 214, 167),
-    (255, 224, 130),
-]
 TRAIL_MAX_LENGTH = 800
 
 
@@ -33,6 +26,7 @@ TRAIL_MAX_LENGTH = 800
 class SimulationSettings:
     """Parameters that can be tuned during the simulation."""
 
+    num_points: int = 5
     point_radius: float = 2.0
     gravitational_constant: float = 60000.0
     max_speed: float = 1720.0
@@ -216,33 +210,47 @@ def _format_int_like(value: float) -> str:
     return f"{int(round(value))}"
 
 
-def _create_default_points(settings: SimulationSettings) -> List[GravityPoint]:
-    rng = random.Random()
-    points: List[GravityPoint] = []
-    min_x = settings.point_radius + settings.boundary_padding + 10
-    max_x = SIMULATION_WIDTH - settings.point_radius - settings.boundary_padding - 10
-    min_y = settings.point_radius + settings.boundary_padding + 10
-    max_y = SCREEN_HEIGHT - settings.point_radius - settings.boundary_padding - 10
+def _create_default_points(
+    settings: SimulationSettings, rng: random.Random
+) -> List[GravityPoint]:
+    return [_create_random_point(settings, rng) for _ in range(settings.num_points)]
 
-    for index in range(5):
-        position = pygame.Vector2(
-            rng.uniform(min_x, max_x),
-            rng.uniform(min_y, max_y),
-        )
-        velocity = pygame.Vector2(
-            rng.uniform(-80.0, 80.0),
-            rng.uniform(-80.0, 80.0),
-        )
-        mass = rng.uniform(1.0, 3.0)
-        points.append(
-            GravityPoint(
-                position=position,
-                velocity=velocity,
-                mass=mass,
-                color=POINT_COLORS[index % len(POINT_COLORS)],
-            )
-        )
-    return points
+
+def _create_random_point(settings: SimulationSettings, rng: random.Random) -> GravityPoint:
+    position = pygame.Vector2(
+        rng.uniform(
+            settings.point_radius + settings.boundary_padding + 10,
+            SIMULATION_WIDTH - settings.point_radius - settings.boundary_padding - 10,
+        ),
+        rng.uniform(
+            settings.point_radius + settings.boundary_padding + 10,
+            SCREEN_HEIGHT - settings.point_radius - settings.boundary_padding - 10,
+        ),
+    )
+    velocity = pygame.Vector2(
+        rng.uniform(-80.0, 80.0),
+        rng.uniform(-80.0, 80.0),
+    )
+    mass = rng.uniform(1.0, 3.0)
+    color = _random_color(rng)
+    return GravityPoint(position=position, velocity=velocity, mass=mass, color=color)
+
+
+def _random_color(rng: random.Random) -> tuple[int, int, int]:
+    return (rng.randint(64, 255), rng.randint(64, 255), rng.randint(64, 255))
+
+
+def _ensure_point_count(
+    simulation: GravitySimulation, settings: SimulationSettings, rng: random.Random
+) -> None:
+    desired = max(1, int(round(settings.num_points)))
+    current = len(simulation.points)
+
+    if desired > current:
+        for _ in range(desired - current):
+            simulation.points.append(_create_random_point(settings, rng))
+    elif desired < current:
+        del simulation.points[desired:]
 
 
 def _build_sliders(settings: SimulationSettings) -> List[Slider]:
@@ -253,6 +261,14 @@ def _build_sliders(settings: SimulationSettings) -> List[Slider]:
     vertical_spacing = 60
 
     specs = [
+        (
+            "Point count",
+            "num_points",
+            2.0,
+            25.0,
+            lambda v: max(1, int(round(v))),
+            lambda v: _format_int_like(v),
+        ),
         (
             "Point radius",
             "point_radius",
@@ -350,8 +366,9 @@ def run() -> None:
     font = pygame.font.SysFont("arial", 16)
     info_font = pygame.font.SysFont("arial", 18)
 
+    rng = random.Random()
     settings = SimulationSettings()
-    simulation = GravitySimulation(settings, _create_default_points(settings))
+    simulation = GravitySimulation(settings, _create_default_points(settings, rng))
     sliders = _build_sliders(settings)
     trails_enabled = True
 
@@ -373,6 +390,7 @@ def run() -> None:
             pygame.Rect(SIMULATION_WIDTH, 0, CONTROL_PANEL_WIDTH, SCREEN_HEIGHT),
         )
 
+        _ensure_point_count(simulation, settings, rng)
         simulation.step(settings.time_step)
 
         if trails_enabled:
