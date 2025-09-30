@@ -20,6 +20,11 @@ TEXT_COLOR = (220, 220, 230)
 SLIDER_TRACK_COLOR = (80, 80, 110)
 SLIDER_HANDLE_COLOR = (210, 210, 230)
 TRAIL_MAX_LENGTH = 1
+GROUP_COLORS: list[tuple[int, int, int]] = [
+    (236, 120, 120),
+    (118, 210, 180),
+    (130, 156, 246),
+]
 
 
 @dataclass
@@ -35,6 +40,38 @@ class SimulationSettings:
     bounce_damping: float = 0.9
     softening_distance: float = 0.01
     max_force: float = 15000.0
+    group_masses: List[float] = field(
+        default_factory=lambda: [140.0, 220.0, 320.0]
+    )
+    group_max_speeds: List[float] = field(
+        default_factory=lambda: [1200.0, 1600.0, 2000.0]
+    )
+
+    def get_group_mass(self, index: int) -> float:
+        if not self.group_masses:
+            return 1.0
+        safe_index = max(0, min(index, len(self.group_masses) - 1))
+        return max(1e-3, self.group_masses[safe_index])
+
+    def set_group_mass(self, index: int, value: float) -> None:
+        if not self.group_masses:
+            self.group_masses = [max(1e-3, value)]
+            return
+        safe_index = max(0, min(index, len(self.group_masses) - 1))
+        self.group_masses[safe_index] = max(1e-3, value)
+
+    def get_group_max_speed(self, index: int) -> float:
+        if not self.group_max_speeds:
+            return self.max_speed
+        safe_index = max(0, min(index, len(self.group_max_speeds) - 1))
+        return max(1.0, self.group_max_speeds[safe_index])
+
+    def set_group_max_speed(self, index: int, value: float) -> None:
+        if not self.group_max_speeds:
+            self.group_max_speeds = [max(1.0, value)]
+            return
+        safe_index = max(0, min(index, len(self.group_max_speeds) - 1))
+        self.group_max_speeds[safe_index] = max(1.0, value)
 
 
 @dataclass
@@ -45,6 +82,7 @@ class GravityPoint:
     velocity: pygame.Vector2
     mass: float
     color: tuple[int, int, int]
+    group_index: int
     trail: List[tuple[float, float]] = field(default_factory=list)
 
     def limit_speed(self, max_speed: float) -> None:
@@ -72,6 +110,9 @@ class GravitySimulation:
         self._update_density_stats()
 
     def step(self, dt: float) -> None:
+        for point in self.points:
+            point.mass = self.settings.get_group_mass(point.group_index)
+
         forces = [pygame.Vector2() for _ in self.points]
         softening_sq = self.settings.softening_distance * self.settings.softening_distance
 
@@ -102,10 +143,14 @@ class GravitySimulation:
             total_acceleration += acceleration
             total_magnitude += acceleration.length()
             point.velocity += acceleration * dt
-            point.limit_speed(self.settings.max_speed)
+            group_speed_limit = min(
+                self.settings.max_speed,
+                self.settings.get_group_max_speed(point.group_index),
+            )
+            point.limit_speed(group_speed_limit)
             point.position += point.velocity * dt
             self._keep_inside(point)
-            point.limit_speed(self.settings.max_speed)
+            point.limit_speed(group_speed_limit)
 
         count = len(self.points)
         if count > 0:
@@ -190,7 +235,7 @@ class Slider:
     def __init__(
         self,
         label: str,
-        attr: str,
+        attr: str | None,
         settings: SimulationSettings,
         min_value: float,
         max_value: float,
@@ -198,6 +243,8 @@ class Slider:
         length: int,
         postprocess: Callable[[float], float],
         formatter: Callable[[float], str],
+        getter: Callable[[], float] | None = None,
+        setter: Callable[[float], None] | None = None,
     ) -> None:
         self.label = label
         self.attr = attr
@@ -210,15 +257,23 @@ class Slider:
         self.formatter = formatter
         self.dragging = False
         self.handle_radius = 8
+        if attr is None:
+            if getter is None or setter is None:
+                raise ValueError("Custom sliders require getter and setter callables")
+            self._value_getter = getter
+            self._value_setter = setter
+        else:
+            self._value_getter = lambda: getattr(self.settings, attr)
+            self._value_setter = lambda value: setattr(self.settings, attr, value)
 
     @property
     def value(self) -> float:
-        return getattr(self.settings, self.attr)
+        return self._value_getter()
 
     def set_value(self, raw_value: float) -> None:
         clamped = max(self.min_value, min(self.max_value, raw_value))
         value = self.postprocess(clamped)
-        setattr(self.settings, self.attr, value)
+        self._value_setter(value)
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -247,7 +302,8 @@ class Slider:
         return pygame.Rect(self.position[0], self.position[1], self.length, 6)
 
     def _handle_rect(self) -> pygame.Rect:
-        ratio = (self.value - self.min_value) / (self.max_value - self.min_value)
+        current = max(self.min_value, min(self.max_value, self.value))
+        ratio = (current - self.min_value) / (self.max_value - self.min_value)
         center_x = self.position[0] + ratio * self.length
         center_y = self.position[1] + 3
         return pygame.Rect(int(center_x) - self.handle_radius, int(center_y) - self.handle_radius, self.handle_radius * 2, self.handle_radius * 2)
@@ -391,10 +447,20 @@ def _format_int_like(value: float) -> str:
 def _create_default_points(
     settings: SimulationSettings, rng: random.Random
 ) -> List[GravityPoint]:
-    return [_create_random_point(settings, rng) for _ in range(settings.num_points)]
+    points: List[GravityPoint] = []
+    desired = max(1, int(round(settings.num_points)))
+    group_count = max(1, len(settings.group_masses))
+
+    for index in range(desired):
+        group_index = index % group_count
+        points.append(_create_random_point(settings, rng, group_index))
+
+    return points
 
 
-def _create_random_point(settings: SimulationSettings, rng: random.Random) -> GravityPoint:
+def _create_random_point(
+    settings: SimulationSettings, rng: random.Random, group_index: int
+) -> GravityPoint:
     position = pygame.Vector2(
         rng.uniform(
             settings.point_radius + settings.boundary_padding + 10,
@@ -405,17 +471,30 @@ def _create_random_point(settings: SimulationSettings, rng: random.Random) -> Gr
             SCREEN_HEIGHT - settings.point_radius - settings.boundary_padding - 10,
         ),
     )
+    max_initial_speed = settings.get_group_max_speed(group_index)
+    spread = min(120.0, max_initial_speed * 0.25)
     velocity = pygame.Vector2(
-        rng.uniform(-80.0, 80.0),
-        rng.uniform(-80.0, 80.0),
+        rng.uniform(-spread, spread),
+        rng.uniform(-spread, spread),
     )
-    mass = rng.uniform(1.0, 300.0)
-    color = _random_color(rng)
-    return GravityPoint(position=position, velocity=velocity, mass=mass, color=color)
+    mass = settings.get_group_mass(group_index)
+    color = _color_for_group(group_index, rng)
+    return GravityPoint(
+        position=position,
+        velocity=velocity,
+        mass=mass,
+        color=color,
+        group_index=group_index,
+    )
 
 
-def _random_color(rng: random.Random) -> tuple[int, int, int]:
-    return (rng.randint(64, 255), rng.randint(64, 255), rng.randint(64, 255))
+def _color_for_group(group_index: int, rng: random.Random) -> tuple[int, int, int]:
+    base = GROUP_COLORS[group_index % len(GROUP_COLORS)]
+    variation = []
+    for channel in base:
+        jitter = rng.randint(-24, 24)
+        variation.append(max(0, min(255, channel + jitter)))
+    return tuple(variation)
 
 
 def _ensure_point_count(
@@ -425,8 +504,10 @@ def _ensure_point_count(
     current = len(simulation.points)
 
     if desired > current:
-        for _ in range(desired - current):
-            simulation.points.append(_create_random_point(settings, rng))
+        group_count = max(1, len(settings.group_masses))
+        for offset in range(desired - current):
+            group_index = (current + offset) % group_count
+            simulation.points.append(_create_random_point(settings, rng, group_index))
     elif desired < current:
         del simulation.points[desired:]
 
@@ -526,6 +607,47 @@ def _build_sliders(settings: SimulationSettings) -> List[Slider]:
                 length=length,
                 postprocess=postprocess,
                 formatter=formatter,
+            )
+        )
+
+    group_start_y = start_y + len(specs) * vertical_spacing + 40
+    group_labels = [f"Group {index + 1}" for index in range(len(settings.group_masses))]
+
+    for group_index, label in enumerate(group_labels):
+        mass_position = (start_x, group_start_y + (group_index * 2) * vertical_spacing)
+        sliders.append(
+            Slider(
+                label=f"{label} mass",
+                attr=None,
+                settings=settings,
+                min_value=20.0,
+                max_value=800.0,
+                position=mass_position,
+                length=length,
+                postprocess=lambda v: round(max(1.0, v), 1),
+                formatter=lambda v: f"{v:.1f}",
+                getter=lambda idx=group_index: settings.get_group_mass(idx),
+                setter=lambda value, idx=group_index: settings.set_group_mass(idx, value),
+            )
+        )
+
+        speed_position = (
+            start_x,
+            group_start_y + (group_index * 2 + 1) * vertical_spacing,
+        )
+        sliders.append(
+            Slider(
+                label=f"{label} max speed",
+                attr=None,
+                settings=settings,
+                min_value=100.0,
+                max_value=15000.0,
+                position=speed_position,
+                length=length,
+                postprocess=lambda v: max(100.0, v),
+                formatter=lambda v: f"{v:,.0f}",
+                getter=lambda idx=group_index: settings.get_group_max_speed(idx),
+                setter=lambda value, idx=group_index: settings.set_group_max_speed(idx, value),
             )
         )
 
