@@ -23,15 +23,15 @@ import pygame
 WINDOW_SIZE: Tuple[int, int] = (640, 640)
 BACKGROUND_COLOR: Tuple[int, int, int] = (20, 20, 30)
 CIRCLE_COLOR: Tuple[int, int, int] = (240, 240, 240)
-ACCENT_COLOR: Tuple[int, int, int] = (220, 60, 60)
-CURRENT_STEP_COLOR: Tuple[int, int, int] = (255, 255, 120)
-DEFAULT_NODE_COLOR: Tuple[int, int, int] = (220, 220, 230)
+ACCENT_COLOR: Tuple[int, int, int] = (220, 160, 60)
+CURRENT_STEP_COLOR: Tuple[int, int, int] = (185, 55, 120)
+DEFAULT_NODE_COLOR: Tuple[int, int, int] = (20, 220, 230)
 POLYGON_COLOR: Tuple[int, int, int] = (200, 50, 50)
 TEXT_COLOR: Tuple[int, int, int] = (210, 210, 220)
 
-NUM_STEPS: int = 16
-NODE_RADIUS: int = 16
-OUTLINE_WIDTH: int = 2
+NUM_STEPS: int = 17
+NODE_RADIUS: int = 19
+OUTLINE_WIDTH: int = 5
 SEQUENCE_DURATION_SECONDS: float = 2.5  # Default cycle duration (full 16 steps)
 
 
@@ -146,6 +146,8 @@ def draw_overlay(
         surface.blit(hint_surface, (20, 20 + idx * 24))
 
 
+
+
 def main() -> None:
     pygame.init()
     pygame.mixer.init(frequency=44100, size=-16, channels=1)
@@ -169,7 +171,9 @@ def main() -> None:
     last_step_time = time.time()
 
     click_sound = create_click_sound()
+    click_sound_first = create_click_sound(frequency = 960, duration_ms = 90, volume = 0.8)
 
+    cicle = 0
     running = True
     while running:
         clock.tick(60)
@@ -203,7 +207,10 @@ def main() -> None:
                 current_step = (current_step + 1) % NUM_STEPS
                 last_step_time = now
                 if current_step in active_nodes:
-                    click_sound.play()
+                    if(current_step == 0):
+                        click_sound_first.play()
+                    else:
+                        click_sound.play()
 
         screen.fill(BACKGROUND_COLOR)
         draw_overlay(screen, font, hints_font, sequence_duration, is_running)
