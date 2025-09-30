@@ -106,7 +106,6 @@ class GravitySimulation:
             point.position += point.velocity * dt
             self._keep_inside(point)
             point.limit_speed(self.settings.max_speed)
-            self._record_trail(point)
 
         count = len(self.points)
         if count > 0:
@@ -145,10 +144,6 @@ class GravitySimulation:
             if point.velocity.y > 0:
                 point.velocity.y *= -self.settings.bounce_damping
 
-    def _record_trail(self, point: GravityPoint) -> None:
-        point.trail.append((point.position.x, point.position.y))
-        if len(point.trail) > TRAIL_MAX_LENGTH:
-            del point.trail[0 : len(point.trail) - TRAIL_MAX_LENGTH]
 
     def _update_density_stats(self) -> None:
         if not self.points:
@@ -393,51 +388,6 @@ def _format_int_like(value: float) -> str:
     return f"{int(round(value))}"
 
 
-def _gravity_background_color(simulation: GravitySimulation) -> tuple[int, int, int]:
-    vector = simulation.last_average_acceleration_vector
-    magnitude = simulation.last_average_acceleration
-
-    avg_mass = simulation.last_average_mass if simulation.last_average_mass > 0 else 1.0
-    max_expected_accel = simulation.settings.max_force / max(0.5, avg_mass)
-    if max_expected_accel <= 0:
-        max_expected_accel = 1.0
-
-    intensity = max(0.0, min(1.0, magnitude / max_expected_accel))
-
-    if vector.length_squared() > 1e-8:
-        direction = vector.normalize()
-        dir_x = (direction.x + 1.0) * 0.5
-        dir_y = (direction.y + 1.0) * 0.5
-    else:
-        dir_x = 0.5
-        dir_y = 0.5
-
-    highlight_red = int(30 + 120 * dir_x * intensity)
-    highlight_green = int(70 + 160 * intensity)
-    highlight_blue = int(30 + 120 * dir_y * intensity)
-
-    highlight_color = (
-        max(0, min(255, highlight_red)),
-        max(0, min(255, highlight_green)),
-        max(0, min(255, highlight_blue)),
-    )
-
-    blend = 0.25 + 0.55 * intensity
-    base_r, base_g, base_b = BACKGROUND_COLOR
-    blended = (
-        int(base_r * (1.0 - blend) + highlight_color[0] * blend),
-        int(base_g * (1.0 - blend) + highlight_color[1] * blend),
-        int(base_b * (1.0 - blend) + highlight_color[2] * blend),
-    )
-
-    return blended
-
-
-def _draw_gravity_background(surface: pygame.Surface, simulation: GravitySimulation) -> None:
-    background_color = _gravity_background_color(simulation)
-    surface.fill(background_color, pygame.Rect(0, 0, SIMULATION_WIDTH, SCREEN_HEIGHT))
-
-
 def _create_default_points(
     settings: SimulationSettings, rng: random.Random
 ) -> List[GravityPoint]:
@@ -459,7 +409,7 @@ def _create_random_point(settings: SimulationSettings, rng: random.Random) -> Gr
         rng.uniform(-80.0, 80.0),
         rng.uniform(-80.0, 80.0),
     )
-    mass = rng.uniform(1.0, 3.0)
+    mass = rng.uniform(1.0, 300.0)
     color = _random_color(rng)
     return GravityPoint(position=position, velocity=velocity, mass=mass, color=color)
 
@@ -619,7 +569,6 @@ def run() -> None:
         feedback.update(dt_real)
 
         surface.fill(BACKGROUND_COLOR)
-        _draw_gravity_background(surface, simulation)
         pygame.draw.rect(
             surface,
             PANEL_COLOR,
