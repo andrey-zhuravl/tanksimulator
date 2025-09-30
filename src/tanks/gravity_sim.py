@@ -16,24 +16,49 @@ from typing import Iterable, List
 import pygame
 
 
-SCREEN_WIDTH = 960
-SCREEN_HEIGHT = 640
+SCREEN_WIDTH = 1560
+SCREEN_HEIGHT = 1140
 BACKGROUND_COLOR = (15, 15, 30)
 POINT_COLORS = [
+   (241, 198, 141),
+    (129, 212, 250),
+    (244, 143, 177),
+    (165, 214, 167),
+    (255, 224, 130),
+    (240, 98, 146),
+    (129, 212, 250),
+    (244, 143, 177),
+    (165, 214, 167),
+    (255, 224, 130),
+    (240, 98, 146),
+    (129, 212, 250),
+    (244, 143, 177),
+    (165, 214, 167),
+    (255, 224, 130),
+    (241, 198, 141),
+    (129, 212, 250),
+    (244, 143, 177),
+    (165, 214, 167),
+    (255, 224, 130),
+    (240, 98, 146),
+    (129, 212, 250),
+    (244, 143, 177),
+    (165, 214, 167),
+    (255, 224, 130),
     (240, 98, 146),
     (129, 212, 250),
     (244, 143, 177),
     (165, 214, 167),
     (255, 224, 130),
 ]
-POINT_RADIUS = 10
+POINT_RADIUS = 2
 GRAVITATIONAL_CONSTANT = 60000.0
-MAX_SPEED = 220.0
-TIME_STEP = 1.0 / 60.0
+MAX_SPEED = 1720.0
+TIME_STEP = 1.0 / 120.0
 BOUNDARY_PADDING = 4
 BOUNCE_DAMPING = 0.9
-SOFTENING_DISTANCE = 12.0
-MAX_FORCE = 4000.0
+SOFTENING_DISTANCE = 0.01
+MAX_FORCE = 15000.0
 
 
 @dataclass
@@ -123,7 +148,7 @@ class GravitySimulation:
 def _create_default_points() -> List[GravityPoint]:
     rng = random.Random()
     points: List[GravityPoint] = []
-    for index in range(5):
+    for index in range(30):
         position = pygame.Vector2(
             rng.uniform(POINT_RADIUS + 80, SCREEN_WIDTH - POINT_RADIUS - 80),
             rng.uniform(POINT_RADIUS + 80, SCREEN_HEIGHT - POINT_RADIUS - 80),
@@ -132,7 +157,7 @@ def _create_default_points() -> List[GravityPoint]:
             rng.uniform(-80.0, 80.0),
             rng.uniform(-80.0, 80.0),
         )
-        mass = rng.uniform(1.0, 3.0)
+        mass = rng.uniform(10.0, 3.0)
         points.append(
             GravityPoint(
                 position=position,
