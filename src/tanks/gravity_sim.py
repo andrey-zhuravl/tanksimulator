@@ -61,6 +61,15 @@ class GravitySimulation:
     def __init__(self, settings: SimulationSettings, points: Iterable[GravityPoint]):
         self.settings = settings
         self.points: List[GravityPoint] = list(points)
+        self.last_average_acceleration: float = 0.0
+        self.last_average_acceleration_vector: pygame.Vector2 = pygame.Vector2()
+        self.last_average_mass: float = 0.0
+        self.last_center_of_mass: pygame.Vector2 = pygame.Vector2(
+            SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2
+        )
+        self.last_density_metric: float = 0.0
+        self._max_density_radius = math.hypot(SIMULATION_WIDTH, SCREEN_HEIGHT) / 2.0
+        self._update_density_stats()
 
     def step(self, dt: float) -> None:
         forces = [pygame.Vector2() for _ in self.points]
@@ -85,14 +94,29 @@ class GravitySimulation:
                 forces[i] += force
                 forces[j] -= force
 
+        total_acceleration = pygame.Vector2()
+        total_magnitude = 0.0
+
         for point, force in zip(self.points, forces):
             acceleration = force / point.mass
+            total_acceleration += acceleration
+            total_magnitude += acceleration.length()
             point.velocity += acceleration * dt
             point.limit_speed(self.settings.max_speed)
             point.position += point.velocity * dt
             self._keep_inside(point)
             point.limit_speed(self.settings.max_speed)
             self._record_trail(point)
+
+        count = len(self.points)
+        if count > 0:
+            self.last_average_acceleration_vector = total_acceleration / count
+            self.last_average_acceleration = total_magnitude / count
+        else:
+            self.last_average_acceleration_vector = pygame.Vector2()
+            self.last_average_acceleration = 0.0
+
+        self._update_density_stats()
 
     def _keep_inside(self, point: GravityPoint) -> None:
         radius = self.settings.point_radius
@@ -125,6 +149,44 @@ class GravitySimulation:
         point.trail.append((point.position.x, point.position.y))
         if len(point.trail) > TRAIL_MAX_LENGTH:
             del point.trail[0 : len(point.trail) - TRAIL_MAX_LENGTH]
+
+    def _update_density_stats(self) -> None:
+        if not self.points:
+            self.last_density_metric = 0.0
+            self.last_average_mass = 0.0
+            self.last_center_of_mass = pygame.Vector2(
+                SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2
+            )
+            return
+
+        total_mass = sum(point.mass for point in self.points)
+        if total_mass <= 0:
+            self.last_density_metric = 0.0
+            self.last_average_mass = 0.0
+            self.last_center_of_mass = pygame.Vector2(
+                SIMULATION_WIDTH / 2, SCREEN_HEIGHT / 2
+            )
+            return
+
+        weighted_position = pygame.Vector2()
+        for point in self.points:
+            weighted_position += point.position * point.mass
+
+        center = weighted_position / total_mass
+        self.last_center_of_mass = center
+        self.last_average_mass = total_mass / len(self.points)
+
+        average_distance = 0.0
+        for point in self.points:
+            average_distance += (point.position - center).length()
+
+        average_distance /= len(self.points)
+
+        if self._max_density_radius > 0:
+            normalized = min(1.0, average_distance / self._max_density_radius)
+            self.last_density_metric = 1.0 - normalized
+        else:
+            self.last_density_metric = 0.0
 
 
 class Slider:
@@ -202,12 +264,178 @@ class Slider:
         self.set_value(raw_value)
 
 
+class DensityFeedbackController:
+    """Feedback loop that modulates gravity parameters based on density."""
+
+    def __init__(self, settings: SimulationSettings, simulation: GravitySimulation) -> None:
+        self.settings = settings
+        self.simulation = simulation
+        self.base_values = {
+            "gravitational_constant": settings.gravitational_constant,
+            "max_force": settings.max_force,
+            "max_speed": settings.max_speed,
+        }
+        self.current_mode: str = "contract"
+        self.pending_mode: str | None = None
+        self.time_since_toggle: float = 0.0
+        self.desired_period: float = 1.0 / 0.08
+        self.current_frequency: float = 0.08
+        self.transition_delay: float = 0.5
+        self.delay_timer: float = 0.0
+        self.response_rate: float = 1.5
+        self.high_density_threshold: float = 0.62
+        self.low_density_threshold: float = 0.38
+        initial_density = simulation.last_density_metric
+        self._last_factors = self._mode_factors(self.current_mode, initial_density)
+        self.tolerance: float = 1e-3
+
+    def update(self, dt: float) -> None:
+        if dt <= 0:
+            return
+
+        self._capture_user_adjustments()
+
+        density = max(0.0, min(1.0, self.simulation.last_density_metric))
+        frequency = 0.01 + 0.29 * density
+        period = 1.0 / frequency
+        min_period = 1.0 / 0.3
+        max_period = 1.0 / 0.01
+        period = max(min_period, min(max_period, period))
+        self.desired_period = period
+        self.current_frequency = 1.0 / period
+        self.time_since_toggle += dt
+
+        cooldown = max(min_period, 0.5 * period)
+
+        if self.pending_mode is None and self.delay_timer <= 0.0:
+            if (
+                density > self.high_density_threshold
+                and self.current_mode != "expand"
+                and self.time_since_toggle >= cooldown
+            ):
+                self._schedule_mode("expand")
+            elif (
+                density < self.low_density_threshold
+                and self.current_mode != "contract"
+                and self.time_since_toggle >= cooldown
+            ):
+                self._schedule_mode("contract")
+            elif self.time_since_toggle >= period:
+                self._schedule_mode("expand" if self.current_mode == "contract" else "contract")
+
+        if self.delay_timer > 0.0:
+            self.delay_timer -= dt
+            if self.delay_timer <= 0.0 and self.pending_mode is not None:
+                self._activate_pending_mode()
+
+        self._apply_targets(dt)
+
+    def _schedule_mode(self, mode: str) -> None:
+        self.pending_mode = mode
+        self.delay_timer = self.transition_delay
+
+    def _activate_pending_mode(self) -> None:
+        if self.pending_mode is None:
+            return
+        self.current_mode = self.pending_mode
+        self.pending_mode = None
+        self.time_since_toggle = 0.0
+
+    def _capture_user_adjustments(self) -> None:
+        density = max(0.0, min(1.0, self.simulation.last_density_metric))
+        current_factors = self._mode_factors(self.current_mode, density)
+
+        for attr, base_value in self.base_values.items():
+            actual = getattr(self.settings, attr)
+            expected = base_value * self._last_factors.get(attr, 1.0)
+            if abs(actual - expected) > self.tolerance:
+                factor = current_factors.get(attr, 1.0)
+                if abs(factor) < 1e-6:
+                    self.base_values[attr] = actual
+                else:
+                    self.base_values[attr] = actual / factor
+                self._last_factors[attr] = factor
+
+    def _apply_targets(self, dt: float) -> None:
+        density = max(0.0, min(1.0, self.simulation.last_density_metric))
+        factors = self._mode_factors(self.current_mode, density)
+        alpha = max(0.0, min(1.0, dt * self.response_rate))
+
+        for attr, base_value in self.base_values.items():
+            target = base_value * factors.get(attr, 1.0)
+            current = getattr(self.settings, attr)
+            new_value = current + (target - current) * alpha
+            setattr(self.settings, attr, new_value)
+            self._last_factors[attr] = factors.get(attr, 1.0)
+
+    def _mode_factors(self, mode: str, density: float) -> dict[str, float]:
+        density = max(0.0, min(1.0, density))
+        if mode == "contract":
+            return {
+                "gravitational_constant": 1.15 + 0.35 * density,
+                "max_force": 1.1 + 0.3 * density,
+                "max_speed": 1.05 + 0.2 * density,
+            }
+
+        inverse_density = 1.0 - density
+        return {
+            "gravitational_constant": 0.55 + 0.35 * inverse_density,
+            "max_force": 0.65 + 0.25 * inverse_density,
+            "max_speed": 0.8 + 0.15 * inverse_density,
+        }
+
+
 def _format_float(value: float, decimals: int = 2) -> str:
     return f"{value:.{decimals}f}"
 
 
 def _format_int_like(value: float) -> str:
     return f"{int(round(value))}"
+
+
+def _gravity_background_color(simulation: GravitySimulation) -> tuple[int, int, int]:
+    vector = simulation.last_average_acceleration_vector
+    magnitude = simulation.last_average_acceleration
+
+    avg_mass = simulation.last_average_mass if simulation.last_average_mass > 0 else 1.0
+    max_expected_accel = simulation.settings.max_force / max(0.5, avg_mass)
+    if max_expected_accel <= 0:
+        max_expected_accel = 1.0
+
+    intensity = max(0.0, min(1.0, magnitude / max_expected_accel))
+
+    if vector.length_squared() > 1e-8:
+        direction = vector.normalize()
+        dir_x = (direction.x + 1.0) * 0.5
+        dir_y = (direction.y + 1.0) * 0.5
+    else:
+        dir_x = 0.5
+        dir_y = 0.5
+
+    highlight_red = int(30 + 120 * dir_x * intensity)
+    highlight_green = int(70 + 160 * intensity)
+    highlight_blue = int(30 + 120 * dir_y * intensity)
+
+    highlight_color = (
+        max(0, min(255, highlight_red)),
+        max(0, min(255, highlight_green)),
+        max(0, min(255, highlight_blue)),
+    )
+
+    blend = 0.25 + 0.55 * intensity
+    base_r, base_g, base_b = BACKGROUND_COLOR
+    blended = (
+        int(base_r * (1.0 - blend) + highlight_color[0] * blend),
+        int(base_g * (1.0 - blend) + highlight_color[1] * blend),
+        int(base_b * (1.0 - blend) + highlight_color[2] * blend),
+    )
+
+    return blended
+
+
+def _draw_gravity_background(surface: pygame.Surface, simulation: GravitySimulation) -> None:
+    background_color = _gravity_background_color(simulation)
+    surface.fill(background_color, pygame.Rect(0, 0, SIMULATION_WIDTH, SCREEN_HEIGHT))
 
 
 def _create_default_points(
@@ -256,7 +484,7 @@ def _ensure_point_count(
 def _build_sliders(settings: SimulationSettings) -> List[Slider]:
     sliders: List[Slider] = []
     start_x = SIMULATION_WIDTH + 24
-    start_y = 80
+    start_y = 150
     length = CONTROL_PANEL_WIDTH - 80
     vertical_spacing = 60
 
@@ -369,11 +597,14 @@ def run() -> None:
     rng = random.Random()
     settings = SimulationSettings()
     simulation = GravitySimulation(settings, _create_default_points(settings, rng))
+    feedback = DensityFeedbackController(settings, simulation)
     sliders = _build_sliders(settings)
     trails_enabled = True
 
     running = True
     while running:
+        dt_real = clock.tick(240) / 1000.0
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -383,15 +614,17 @@ def run() -> None:
             for slider in sliders:
                 slider.handle_event(event)
 
+        _ensure_point_count(simulation, settings, rng)
+        simulation.step(settings.time_step)
+        feedback.update(dt_real)
+
         surface.fill(BACKGROUND_COLOR)
+        _draw_gravity_background(surface, simulation)
         pygame.draw.rect(
             surface,
             PANEL_COLOR,
             pygame.Rect(SIMULATION_WIDTH, 0, CONTROL_PANEL_WIDTH, SCREEN_HEIGHT),
         )
-
-        _ensure_point_count(simulation, settings, rng)
-        simulation.step(settings.time_step)
 
         if trails_enabled:
             for point in simulation.points:
@@ -413,11 +646,25 @@ def run() -> None:
         trails_surface = font.render(f"{trails_text} (press T)", True, TEXT_COLOR)
         surface.blit(trails_surface, (SIMULATION_WIDTH + 24, 50))
 
+        density_surface = font.render(
+            f"Density: {simulation.last_density_metric:.2f}", True, TEXT_COLOR
+        )
+        surface.blit(density_surface, (SIMULATION_WIDTH + 24, 74))
+
+        pulse_surface = font.render(
+            f"Pulse: {feedback.current_frequency:.2f} Hz", True, TEXT_COLOR
+        )
+        surface.blit(pulse_surface, (SIMULATION_WIDTH + 24, 92))
+
+        mode_surface = font.render(
+            f"Mode: {feedback.current_mode.capitalize()}", True, TEXT_COLOR
+        )
+        surface.blit(mode_surface, (SIMULATION_WIDTH + 24, 110))
+
         for slider in sliders:
             slider.draw(surface, font)
 
         pygame.display.flip()
-        clock.tick(240)
 
     pygame.quit()
 
