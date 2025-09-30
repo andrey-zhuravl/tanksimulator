@@ -19,8 +19,8 @@ class SimulationSettings:
     bounce_damping: float = 0.9
     softening_distance: float = 0.01
     max_force: float = 15000.0
-    group_masses: List[float] = field(default_factory=lambda: [140.0, 220.0, 320.0])
-    group_max_speeds: List[float] = field(default_factory=lambda: [1200.0, 1600.0, 2000.0])
+    group_masses: List[float] = field(default_factory=lambda: [140.0, 220.0, 320.0, 140.0, 220.0])
+    group_max_speeds: List[float] = field(default_factory=lambda: [1200.0, 1600.0, 2000.0,1200.0, 1600.0])
 
     def get_group_mass(self, index: int) -> float:
         if not self.group_masses:

@@ -249,3 +249,4 @@ def _build_sliders(settings: SimulationSettings) -> list[Slider]:
         )
 
     return sliders
+
